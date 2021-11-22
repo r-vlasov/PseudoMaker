@@ -67,6 +67,7 @@ contract PseudoMaker {
         return addressCDP[usr];
     }
     
+    // Now everyone can set a price - this is done for debugging. In fact, inside the oracle should be called, which will put rate
     function reNewRate(uint256 _rate) public {
         rate = _rate; // there should be oracle
         refreshAllCDP(rate);
