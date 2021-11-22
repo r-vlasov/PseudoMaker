@@ -9,7 +9,8 @@ import "./Math.sol";
 
 contract DAI is Ownable, IERC20 {
     
-    mapping (address => uint) private tokens;
+    mapping (address => uint256) private tokens;
+    mapping (address => mapping (address => uint256)) private ApprovedTokens;
     
     uint256 private totalTokenSupply;
     
@@ -39,14 +40,24 @@ contract DAI is Ownable, IERC20 {
         return transferFrom(msg.sender, dst, dai);
     }
     
-    function transferFrom(address src, address dst, uint dai) override public returns (bool)
-    {
-        require(src == msg.sender);
+    function transferFrom(address src, address dst, uint dai) override public returns (bool) {
+        require(src == msg.sender || ApprovedTokens[src][msg.sender] >= dai);
         require(tokens[src] >= dai, "Insufficient-balance");
+        if (src != msg.sender) {
+            ApprovedTokens[src][msg.sender] -= dai;
+        }
         tokens[src] = SafeMath.sub(tokens[src], dai);
         tokens[dst] = SafeMath.add(tokens[dst], dai);
         emit Transfer(src, dst, dai);
         return true;
     }
-
+    
+    function approve(address _spender, uint256 _value) public returns (bool success) {
+        ApprovedTokens[msg.sender][_spender] = _value;
+        return(true);
+    }
+    
+    function allowance(address _owner, address _spender) public view returns (uint256 remaining) {
+        return(ApprovedTokens[_owner][_spender]);
+    }
 }
