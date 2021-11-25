@@ -11,7 +11,6 @@ contract CDP {
     address creator;
     address owner;
     address makerAddress;  
-    address makerAuctionAddress;
     WEther weth;
     uint256 rate;
     uint256 wethBalance = 0;
@@ -35,7 +34,6 @@ contract CDP {
     constructor (address _creator) {
         creator = _creator;
         owner = creator;
-        // msg.sender is withdraw
         makerAddress = msg.sender;
         weth = new WEther(creator); // only PseudoMaker can withdraw
         status = StatusType.OPENED;
@@ -63,11 +61,10 @@ contract CDP {
         return(status == StatusType.BORROWED);
     }
     
-    function fund(uint256 _amount, uint256 _rate) payable public OnlyMaker returns(uint256) {
+    function fund(uint256 _amount) payable public OnlyMaker returns(uint256) {
         require(status == StatusType.OPENED);
-        rate = _rate;
-        uint256 _tokenBorrowed = SafeMath.mul(rate, SafeMath.div(msg.value, WETH));
-        require(_amount < _tokenBorrowed);
+        uint256 _maxTokenBorrowed = SafeMath.div(SafeMath.mul(PseudoMaker(makerAddress).wethDaiRate(), msg.value), WETH);
+        require(_amount < _maxTokenBorrowed);
         
         wethBalance = msg.value;
         tokenBorrowed = _amount;
@@ -85,7 +82,7 @@ contract CDP {
         if (status != StatusType.BORROWED) {
             return(false);
         } 
-        uint256 _currRateDaiBorrowed = SafeMath.mul(PseudoMaker(makerAddress).wethDaiRate(), SafeMath.div(wethDeposit(), WETH_RESERVED));
+        uint256 _currRateDaiBorrowed = SafeMath.div(SafeMath.mul(PseudoMaker(makerAddress).wethDaiRate(), wethDeposit()), WETH_RESERVED);
         if (daiBorrowed() > _currRateDaiBorrowed) {
             owner = makerAddress;
             status = StatusType.AUCTIONED;
@@ -94,7 +91,7 @@ contract CDP {
         }
         return(false);
     }
-    
+
     function destroyByAuction(address _newOwner) public OnlyMaker {
         weth.changeOwner(_newOwner);
         back();

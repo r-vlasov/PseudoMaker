@@ -12,7 +12,7 @@ contract PseudoMaker {
     Auction auction;
     mapping (address => CDP[]) private addressCDP;
     address[] private users;
-    uint256 private rate = 0; // how much weth by 1$
+    uint256 private rate; // how much weth costs
     
     modifier OnlyAuction() {
         require(msg.sender == address(auction));
@@ -48,7 +48,7 @@ contract PseudoMaker {
 
     function _searchInCdpArray(address _cdp, CDP[] memory _cdps) private pure returns(bool, uint256) {
         for (uint i = 0; i < _cdps.length; i++) {
-            if (_cdps[i] == CDP(_cdp)) {
+            if (address(_cdps[i]) == _cdp) {
                 return(true, i);
             }
         }
@@ -57,7 +57,7 @@ contract PseudoMaker {
     
     function fund(uint256 amount) public payable returns(CDP) {
         CDP _cdp = new CDP(msg.sender);
-        _cdp.fund{value:msg.value}(amount, rate);
+        _cdp.fund{value:msg.value}(amount);
         dai.mint(msg.sender, amount);
         
         addressCDP[msg.sender].push(_cdp);
@@ -88,7 +88,7 @@ contract PseudoMaker {
         return(addressCDP[usr]);
     }
     
-    function deleteCdp(address usr, address _cdp) public {
+    function deleteCdpFromUser(address usr, address _cdp) private {
         require(CDP(_cdp).isOpen() == false);
         (bool _in, uint256 _idx) = _searchInCdpArray(_cdp, addressCDP[usr]);
         require(_in == true);
@@ -109,5 +109,6 @@ contract PseudoMaker {
     function bidAuctionCDP(address _cdpAddress, address sender) public OnlyAuction {
         dai.burn(sender, CDP(_cdpAddress).daiBorrowed());
         CDP(_cdpAddress).destroyByAuction(sender);
+        deleteCdpFromUser(CDP(_cdpAddress).getCreator(), _cdpAddress);
     }
 }
