@@ -6,27 +6,36 @@ import "./Dai.sol";
 import "./Cdp.sol";
 import "./Auction.sol";
 
+import "@chainlink/contracts/src/v0.6/interfaces/AggregatorV3Interface.sol";
+
 contract PseudoMaker {
     
     DAI dai;
     Auction auction;
     mapping (address => CDP[]) private addressCDP;
     address[] private users;
-    uint256 private rate; // how much weth costs
     
+    AggregatorV3Interface internal priceFeed;
+
     modifier OnlyAuction() {
         require(msg.sender == address(auction));
         _;
     }
     
+    function getLatestPrice() public view returns (uint256) {
+        (, int256 price,,, ) = priceFeed.latestRoundData();
+        return uint256(price);
+    }
+    
     constructor() {
         dai = new DAI();
         auction = new Auction();
-        reNewRate(10);
+        priceFeed = AggregatorV3Interface(0x9326BFA02ADD2366b30bacB125260Af641031331);
     }
     
-    function wethDaiRate() public view returns(uint256) {
-        return rate;
+    function wethDaiRate() public view returns (uint256) {
+        (, int256 price,,, ) = priceFeed.latestRoundData();
+        return uint256(price);
     }
     
     function daiAddress() public view returns(address) {
@@ -96,11 +105,6 @@ contract PseudoMaker {
         addressCDP[usr][_idx] = addressCDP[usr][len - 1];
         addressCDP[usr].pop();
     } 
-
-    // Now everyone can set a price - this is done for debugging. In fact, inside the oracle should be called, which will put rate
-    function reNewRate(uint256 _rate) public {
-        rate = _rate; // there should be an oracle
-    }
 
     function addCDPAuction(address _cdpAddress) public OnlyAuction returns(bool) {
         return(CDP(_cdpAddress).reCalculateFundCloseCDPAuction());
