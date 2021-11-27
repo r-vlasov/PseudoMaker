@@ -12,7 +12,6 @@ contract CDP {
     address owner;
     address makerAddress;  
     WEther weth;
-    uint256 rate;
     uint256 wethBalance = 0;
     uint256 tokenBorrowed = 0;
     uint256 constant WETH = 10 ** 18;
@@ -88,7 +87,12 @@ contract CDP {
         if (status != StatusType.BORROWED) {
             return(false);
         } 
-        uint256 _currRateDaiBorrowed = SafeMath.div(SafeMath.mul(PseudoMaker(makerAddress).wethDaiRate(), wethDeposit()), WETH_RESERVED);
+        uint256 _currRateDaiBorrowed = SafeMath.div(
+            SafeMath.div(
+                    SafeMath.mul(PseudoMaker(makerAddress).wethDaiRate(), wethDeposit()),
+                    CHAINLINK_ETH_USD
+            ), WETH_RESERVED
+        );
         if (daiBorrowed() > _currRateDaiBorrowed) {
             owner = makerAddress;
             status = StatusType.AUCTIONED;
