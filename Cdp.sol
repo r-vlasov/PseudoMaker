@@ -15,8 +15,9 @@ contract CDP {
     uint256 rate;
     uint256 wethBalance = 0;
     uint256 tokenBorrowed = 0;
-    uint256 constant WETH = 10**18;
-    uint256 constant WETH_RESERVED = 11 * 10**17; // for reservation (like Maker)
+    uint256 constant WETH = 10 ** 18;
+    uint256 constant WETH_RESERVED = 11 * 10 ** 17; // for reservation (like Maker)
+    uint256 constant CHAINLINK_ETH_USD = 10 ** 8;
     
     enum StatusType {
         OPENED, 
@@ -63,7 +64,12 @@ contract CDP {
     
     function fund(uint256 _amount) payable public OnlyMaker returns(uint256) {
         require(status == StatusType.OPENED);
-        uint256 _maxTokenBorrowed = SafeMath.div(SafeMath.mul(PseudoMaker(makerAddress).wethDaiRate(), msg.value), WETH);
+        uint256 _maxTokenBorrowed = SafeMath.div(
+            SafeMath.div(
+                SafeMath.mul(PseudoMaker(makerAddress).wethDaiRate(), msg.value),
+                CHAINLINK_ETH_USD 
+            ), WETH
+        );
         require(_amount < _maxTokenBorrowed);
         
         wethBalance = msg.value;

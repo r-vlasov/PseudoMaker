@@ -2,105 +2,120 @@
 
 pragma solidity ^0.8.0;
 
-import "./WEther.sol";
-import "./Math.sol";
-import "./PseudoMaker.sol";
+import "./Dai.sol";
+import "./Cdp.sol";
+import "./Auction.sol";
 
-contract CDP {
-  
-    address creator;
-    address owner;
-    address makerAddress;  
-    WEther weth;
-    uint256 rate;
-    uint256 wethBalance = 0;
-    uint256 tokenBorrowed = 0;
-    uint256 constant WETH = 10 ** 18;
-    uint256 constant WETH_RESERVED = 11 * 10**17; // for reservation (like Maker)
-    uint256 constant CHAINLINK_ETH_USD = 10 ** 8;
+import "@chainlink/contracts/src/v0.6/interfaces/AggregatorV3Interface.sol";
+
+contract PseudoMaker {
     
-    enum StatusType {
-        OPENED, 
-        BORROWED, 
-        CLOSED,
-        AUCTIONED
-    }
-    StatusType status;
+    DAI dai;
+    Auction auction;
+    mapping (address => CDP[]) private addressCDP;
+    address[] private users;
+    uint256 private rate; // how much weth costs
     
-    modifier OnlyMaker() {
-        require(msg.sender == makerAddress);
+    AggregatorV3Interface internal priceFeed;
+
+    modifier OnlyAuction() {
+        require(msg.sender == address(auction));
         _;
     }
     
-    constructor (address _creator) {
-        creator = _creator;
-        owner = creator;
-        makerAddress = msg.sender;
-        weth = new WEther(creator); // only PseudoMaker can withdraw
-        status = StatusType.OPENED;
+    constructor() {
+        dai = new DAI();
+        auction = new Auction();
+        rate = 10;
+        priceFeed = AggregatorV3Interface(0x9326BFA02ADD2366b30bacB125260Af641031331);
     }
     
-    function wethDeposit() public view returns(uint256) {
-        require(wethBalance == weth.getBalance());
-        return(weth.getBalance());
+    function wethDaiRate() public view returns(uint256) {
+        return rate;
     }
     
-    function daiBorrowed() public view returns(uint256) {
-        return(tokenBorrowed);
-    }
-    
-    function getCreator() public view returns(address) {
-        return(creator);
-    }
-    
-    function getMakerAddress() public view returns(address) {
-        return(makerAddress);
-    }
-    
-        
-    function isOpen() public view returns(bool) {
-        return(status == StatusType.BORROWED);
-    }
-    
-    function fund(uint256 _amount) payable public OnlyMaker returns(uint256) {
-        require(status == StatusType.OPENED);
-        uint256 _maxTokenBorrowed = SafeMath.div(
-            SafeMath.div(
-                SafeMath.mul(PseudoMaker(makerAddress).wethDaiRate(), msg.value),
-                CHAINLINK_ETH_USD 
-            ), WETH
-        );
-        require(_amount < _maxTokenBorrowed);
-        
-        wethBalance = msg.value;
-        tokenBorrowed = _amount;
-        weth.deposit{value:msg.value}();
-        status = StatusType.BORROWED;
-        return(tokenBorrowed);
-    }
-    
-    function back() public OnlyMaker {
-        weth.withdraw();
-        status = StatusType.CLOSED;
+    function daiAddress() public view returns(address) {
+        return(address(dai));
     }
 
-    function reCalculateFundCloseCDPAuction() public OnlyMaker returns(bool) {
-        if (status != StatusType.BORROWED) {
-            return(false);
-        } 
-        uint256 _currRateDaiBorrowed = SafeMath.div(SafeMath.mul(PseudoMaker(makerAddress).wethDaiRate(), wethDeposit()), WETH_RESERVED);
-        if (daiBorrowed() > _currRateDaiBorrowed) {
-            owner = makerAddress;
-            status = StatusType.AUCTIONED;
-            weth.changeOwner(makerAddress);
-            return(true);
+    function auctionAddress() public view returns(address) {
+        return(address(auction));
+    }
+    
+    function _searchInArray(address _usr, address[] memory _users) private pure returns(bool, uint256) {
+        for (uint i = 0; i < _users.length; i++) {
+            if (_users[i] == _usr) {
+                return(true, i);
+            }
+        }
+        return(false, 0);
+    } 
+
+    function _searchInCdpArray(address _cdp, CDP[] memory _cdps) private pure returns(bool, uint256) {
+        for (uint i = 0; i < _cdps.length; i++) {
+            if (address(_cdps[i]) == _cdp) {
+                return(true, i);
+            }
+        }
+        return(false, 0);
+    } 
+    
+    function fund(uint256 amount) public payable returns(CDP) {
+        CDP _cdp = new CDP(msg.sender);
+        _cdp.fund{value:msg.value}(amount);
+        dai.mint(msg.sender, amount);
+        
+        addressCDP[msg.sender].push(_cdp);
+        (bool _in, uint256 _idx) = _searchInArray(msg.sender, users); _idx = 0;
+        if (_in == false) {
+            users.push(msg.sender);
+        }
+        return(_cdp);
+    }
+    
+    function back(address cdpAddress) public returns(bool) {
+        require(CDP(cdpAddress).isOpen());
+        uint256 len = addressCDP[msg.sender].length;
+        for (uint i = 0; i < addressCDP[msg.sender].length; i++) {
+            CDP _cdp = addressCDP[msg.sender][i];
+            if (address(_cdp) == cdpAddress) {
+                dai.burn(msg.sender, _cdp.daiBorrowed());
+                _cdp.back();
+                addressCDP[msg.sender][i] = addressCDP[msg.sender][len - 1];
+                addressCDP[msg.sender].pop();
+                return(true);
+            }
         }
         return(false);
     }
 
-    function destroyByAuction(address _newOwner) public OnlyMaker {
-        weth.changeOwner(_newOwner);
-        back();
-        status = StatusType.CLOSED;
+    function cdpByAddress(address usr) public view returns(CDP[] memory) {
+        return(addressCDP[usr]);
     }
+    
+    function deleteCdpFromUser(address usr, address _cdp) private {
+        require(CDP(_cdp).isOpen() == false);
+        (bool _in, uint256 _idx) = _searchInCdpArray(_cdp, addressCDP[usr]);
+        require(_in == true);
+        uint len = addressCDP[usr].length;
+        addressCDP[usr][_idx] = addressCDP[usr][len - 1];
+        addressCDP[usr].pop();
+    } 
+
+    // Now everyone can set a price - this is done for debugging. In fact, inside the oracle should be called, which will put rate
+    function reNewRate(uint256 _rate) public {
+        rate = _rate; // there should be an oracle
+    }
+
+    function addCDPAuction(address _cdpAddress) public OnlyAuction returns(bool) {
+        return(CDP(_cdpAddress).reCalculateFundCloseCDPAuction());
+    }
+    
+    function bidAuctionCDP(address _cdpAddress, address sender) public OnlyAuction {
+        dai.burn(sender, CDP(_cdpAddress).daiBorrowed());
+        CDP(_cdpAddress).destroyByAuction(sender);
+        deleteCdpFromUser(CDP(_cdpAddress).getCreator(), _cdpAddress);
+    }
+
+    
 }
